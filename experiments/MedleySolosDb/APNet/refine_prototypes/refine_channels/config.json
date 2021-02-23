@@ -1,0 +1,48 @@
+{
+    "features" : {
+        "MelSpectrogram" : {
+            "sequence_time": 3.0, 
+            "sequence_hop_time":-1.0,
+            "audio_hop":1024,
+            "audio_win":4096,
+            "sr": 44100,
+            "mel_bands": 256,
+            "n_fft":4096,
+            "pad_mode" : "constant"
+        }     
+    },
+
+    "train" : {
+        "early_stopping" : 100,
+        "epochs" : 200,
+        "considered_improvement" : 0.0,
+        "learning_rate" : 0.001,
+        "batch_size" : 96,
+        "verbose" : 1,
+        "optimizer" : "Adam"
+    },
+
+    "models" : {
+        "APNet" : {
+            "normalizer" : "minmax",
+            "model_arguments" : {
+                "filter_size_cnn" : [5,5],
+                "distance" : "euclidean",
+                "use_weighted_sum": 1,
+                "n_prototypes" : 40,
+                "N_filters" : [48,48,48]
+            },
+            "train_arguments": {
+                "loss_weights" : [10,5,5]
+            }          
+        }         
+    },
+
+    "datasets" : {
+        "MedleySolosDb" : {
+            "dataset_path" : "../datasets/Medley-solos-DB",
+            "evaluation_mode" : "train-validate-test"
+        }
+    }
+
+}

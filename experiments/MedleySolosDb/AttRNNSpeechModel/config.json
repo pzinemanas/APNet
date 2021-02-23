@@ -1,0 +1,42 @@
+{
+    "features" : {
+        "MelSpectrogram" : {
+            "sequence_time": 2.99, 
+            "sequence_hop_time":-1.0,
+            "audio_hop":1024,
+            "audio_win":1024,
+            "sr": 44100,
+            "mel_bands": 256,
+            "n_fft":1024,
+            "pad_mode" : "constant"
+        }    
+    },
+
+    "train" : {
+        "early_stopping" : 100,
+        "epochs" : 200,
+        "considered_improvement" : 0.0,
+        "learning_rate" : 0.001,
+        "batch_size" : 128,
+        "verbose" : 1,
+        "optimizer" : "Adam"
+    },
+
+    "models" : {
+        "AttRNNSpeechModel" : {
+            "normalizer" : "standard",
+            "model_arguments" : {
+            },
+            "train_arguments": {
+                "losses" : ["categorical_crossentropy"]
+            }   
+        }           
+    },
+
+    "datasets" : {
+        "MedleySolosDb" : {
+            "dataset_path" : "../datasets/Medley-solos-DB",
+            "evaluation_mode" : "train-validate-test"
+        }
+    }
+}

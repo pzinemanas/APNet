@@ -1,0 +1,42 @@
+{
+    "features" : {
+        "MelSpectrogram" : {
+            "sequence_time": 0.99, 
+            "sequence_hop_time":-1,
+            "audio_hop":256,
+            "audio_win":1024,
+            "sr": 16000,
+            "mel_bands": 80,
+            "n_fft":1024,
+            "pad_mode" : "constant"
+        }       
+    },
+
+    "train" : {
+        "early_stopping" : 100,
+        "epochs" : 200,
+        "considered_improvement" : 0.0,
+        "learning_rate" : 0.001,
+        "batch_size" : 128,
+        "verbose" : 1,
+        "optimizer" : "Adam"
+    },
+
+    "models" : {
+        "AttRNNSpeechModel" : {
+            "normalizer" : "standard",
+            "model_arguments" : {
+            },
+            "train_arguments": {
+                "losses" : ["categorical_crossentropy"]
+            }   
+        }
+    },
+
+    "datasets" : {
+        "GoogleSpeechCommands" : {
+            "dataset_path" : "../datasets/Google_Speech_Commands",
+            "evaluation_mode" : "train-validate-test"
+        }
+    }
+}

@@ -1,0 +1,44 @@
+{
+    "features" : {
+        "Openl3" : {
+            "sequence_time": 1.0, 
+            "sequence_hop_time": 1.0,
+            "audio_hop":256,
+            "audio_win":1024,
+            "sr": 48000,
+            "content_type" : "music",
+            "input_repr" : "mel256", 
+            "embedding_size" : 512
+        }        
+    },
+
+    "train" : {
+        "early_stopping" : 100,
+        "epochs" : 200,
+        "considered_improvement" : 0.0,
+        "learning_rate" : 0.001,
+        "batch_size" : 32,
+        "verbose" : 1,
+        "optimizer" : "Adam"
+    },
+
+    "models" : {
+        "MLP" : {
+            "normalizer" : "standard",
+            "model_arguments" : {
+                "hidden_layers_size": [512, 128],
+                "l2_reg":0.0001,
+                "final_activation" : "softmax",
+                "temporal_integration" : "none"                
+            },
+            "train_arguments": { }      
+        }
+    },
+
+    "datasets" : {
+        "GoogleSpeechCommands" : {
+            "dataset_path" : "../datasets/Google_Speech_Commands",
+            "evaluation_mode" : "train-validate-test"
+        }
+    }
+}

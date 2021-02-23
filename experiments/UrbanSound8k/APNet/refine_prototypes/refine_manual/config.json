@@ -1,0 +1,51 @@
+{
+  "features": {
+    "MelSpectrogram": {
+      "sequence_time": 3.99,
+      "sequence_hop_time": -1.0,
+      "audio_hop": 1024,
+      "audio_win": 4096,
+      "sr": 22050,
+      "mel_bands": 128,
+      "n_fft": 4096,
+      "pad_mode": "constant"
+    }
+  },
+  "train": {
+    "early_stopping": 100,
+    "epochs": 200,
+    "considered_improvement": 0.0,
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "verbose": 1,
+    "optimizer": "Adam"
+  },
+  "models": {
+    "APNet": {
+      "normalizer": "minmax",
+      "model_arguments": {
+        "filter_size_cnn": [
+          5,
+          5
+        ],
+        "distance": "euclidean",
+        "use_weighted_sum": 1,
+        "n_prototypes": -1
+      },
+      "train_arguments": {
+        "loss_weights": [
+          10,
+          5,
+          5
+        ],
+        "init_last_layer": 0
+      }
+    }
+  },
+  "datasets": {
+    "UrbanSound8k": {
+      "dataset_path": "../datasets/UrbanSound8K",
+      "evaluation_mode": "cross-validation"
+    }
+  }
+}
