@@ -64,13 +64,15 @@ def generate_figure2D(model_container, selectedpoints=[],
                       label_list=[]):
     prototypes_feat,prototypes_mel,protoypes2D,prototypes_classes,_ = model_container.prototypes.get_all_instances()
 
+    n_classes = len(label_list) if len(label_list) > 0 else 10
+
     prototype_ixs = np.arange(0,len(prototypes_feat))
     x = []
     y = []
     classes = []
     classes_ix = []
     prototypes_ixs = []
-    for class_ix in range(10):
+    for class_ix in range(n_classes):
         prototypes_class_ix = protoypes2D[prototypes_classes == class_ix]
         prototype_ixs_class = prototype_ixs[prototypes_classes == class_ix]
         #print(prototypes_class_ix.shape)
@@ -100,7 +102,7 @@ def generate_figure2D(model_container, selectedpoints=[],
     #centers_classes = self.model_containers[self.fold_test].data_instances.X_feat_2D['Y']
     #centers_ixs = np.arange(0,len(centers2D))
 
-    for class_ix in range(10):
+    for class_ix in range(n_classes):
         centers_class_ix = centers2D[centers_classes == class_ix]
         centers_ixs_class = centers_ixs[centers_classes == class_ix]
         xj = []
@@ -124,7 +126,7 @@ def generate_figure2D(model_container, selectedpoints=[],
     for label in label_list:
         proto_list.append(label + ' (protos.)')
 
-    for j in range(len(label_list)):
+    for j in range(n_classes):
         s = min(samples_per_class,len(x_centers[j]))
         selectedpoints_j = None
         if len(selectedpoints) > 0:
@@ -138,7 +140,7 @@ def generate_figure2D(model_container, selectedpoints=[],
             go.Scatter(
                 x=x[j], y=y[j], text=classes[j], name=proto_list[j],
                 mode='markers',selectedpoints=selectedpoints_j,
-                marker={'size': size, 'symbol':'cross', 'color':colors[j]}),
+                marker={'size': size, 'symbol':'cross', 'color':colors[j%10]}),
             row=1, col=1
         )
         fig.add_trace(
@@ -146,7 +148,7 @@ def generate_figure2D(model_container, selectedpoints=[],
                 x=x_centers[j][:s], y=y_centers[j][:s],
                 text=classes_centers[j][:s], name=label_list[j],
                 selectedpoints=None,mode='markers',
-                marker={'size': 5, 'color':colors[j], 'opacity':0.6}),
+                marker={'size': 5, 'color':colors[j%10], 'opacity':0.6}),
             row=1, col=1
         )
         # if len(selectedpoints) == 0:

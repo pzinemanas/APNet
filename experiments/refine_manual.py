@@ -95,7 +95,7 @@ parser.add_argument('--force', dest='force_prototpye_calculation', action='store
 parser.set_defaults(force_prototpye_calculation=False)
 
 parser.add_argument('--wo_audio', dest='get_audio_prototypes', action='store_false')
-parser.set_defaults(get_audio_prototypes=False)
+parser.set_defaults(get_audio_prototypes=True)
 
 args = parser.parse_args()
 
@@ -169,7 +169,8 @@ data_gen_train = DataGenerator(
 
 if args.dataset == 'MedleySolosDb':
     data_gen_train.audio_file_list = data_gen_train.audio_file_list[:int(len( data_gen_train.audio_file_list)/3)]
-
+if args.dataset ==  'GoogleSpeechCommands':
+    data_gen_train.audio_file_list = data_gen_train.audio_file_list[:int(len( data_gen_train.audio_file_list)/10)]
 #for j in range(len(data_gen_train)):
 X_train, Y_train = data_gen_train.get_data()
 

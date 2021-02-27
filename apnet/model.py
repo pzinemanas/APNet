@@ -97,7 +97,6 @@ class APNet(KerasModelContainer):
         prototype_distances = PrototypeLayer(self.n_prototypes, classes, distance=self.distance,
                                              name='prototype_distances', use_weighted_sum=self.use_weighted_sum)(feature_vectors)
 
-        print('distance',prototype_distances.shape)
         #prototype_similarity = Lambda(lambda x: K.log((x+1)/(x +K.epsilon())),name='similarity')(prototype_distances)#K.log((distance+1)/(distance+K.epsilon())) #
         #prototype_similarity = Lambda(lambda x: 1/(1+K.exp(x)),name='similarity')(prototype_distances)#K.log((distance+1)/(distance+K.epsilon())) #
 
@@ -365,7 +364,7 @@ class APNet(KerasModelContainer):
         prototype_similarity_local = Lambda(lambda x: K.exp(-x),name='similarity_local')(prototype_distances)
 
         n_classes = self.model.get_layer('out').output_shape[1]
-        print(self.distance, self.use_weighted_sum)
+
         if self.distance == 'euclidean_patches':
             prototype_distances_sum = Lambda(lambda x: K.sum(x,2),name='prototype_distances_sum')(prototype_distances)
             prototype_similarity_global = Lambda(lambda x: K.exp(-x),name='similarity_global')(prototype_distances_sum)

@@ -80,7 +80,7 @@ class WeightedSum(Layer):
             shape = (input_shape[1],input_shape[2],input_shape[3])
         else:
             shape = (input_shape[1],input_shape[2])
-        print(shape)
+
         self.kernel = self.add_weight(name='prototype_feature_vectors', 
                                       shape=shape,
                                       initializer=Constant(value=1/float(input_shape[2])),constraint=UnitNorm(axis=0),#,
