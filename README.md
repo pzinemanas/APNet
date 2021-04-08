@@ -1,4 +1,8 @@
-## APNet
+# APNet
+
+This repository includes the code for running the experiments reported in
+
+Zinemanas, P.; Rocamora, M.; Miron, M.; Font, F.; Serra, X. [An Interpretable Deep Learning Model for Automatic Sound Classification](https://www.mdpi.com/2079-9292/10/7/850). Electronics 2021, 10, 850. https://doi.org/10.3390/electronics10070850 
 
 ## Installation instructions
 APNet uses DCASE-models and therefore please follow the recomendations from this library: 
