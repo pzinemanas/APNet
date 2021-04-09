@@ -1,37 +1,64 @@
-## Welcome to GitHub Pages
+# APNet
 
-You can use the [editor on GitHub](https://github.com/pzinemanas/APNet/edit/master/README.md) to maintain and preview the content for your website in Markdown files.
+This repository includes the code for running the experiments reported in
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+Zinemanas, P.; Rocamora, M.; Miron, M.; Font, F.; Serra, X. [An Interpretable Deep Learning Model for Automatic Sound Classification](https://www.mdpi.com/2079-9292/10/7/850). Electronics 2021, 10, 850. https://doi.org/10.3390/electronics10070850 
 
-### Markdown
+## Installation instructions
+APNet uses DCASE-models and therefore please follow the recomendations from this library: 
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
-
-```markdown
-Syntax highlighted code block
-
-# Header 1
-## Header 2
-### Header 3
-
-- Bulleted
-- List
-
-1. Numbered
-2. List
-
-**Bold** and _Italic_ and `Code` text
-
-[Link](url) and ![Image](src)
+We recommend to install DCASE-models in a dedicated virtual environment. For instance, using [anaconda](https://www.anaconda.com/):
+```
+conda create -n apnet python=3.6
+conda activate apnet
+```
+For GPU support:
+```
+conda install cudatoolkit cudnn
+```
+DCASE-models uses [SoX](http://sox.sourceforge.net/) for functions related to the datasets. You can install it in your conda environment by:
+```
+conda install -c conda-forge sox
+```
+Before installing the library, you must install only one of the Tensorflow variants: CPU-only or GPU.
+``` 
+pip install "tensorflow<1.14" # for CPU-only version
+pip install "tensorflow-gpu<1.14" # for GPU version
 ```
 
-For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
+Now please install DCASE-models from github repository:
+``` 
+git clone https://github.com/MTG/DCASE-models.git
+cd DCASE-models
+pip install .
+```
 
-### Jekyll Themes
+Install other dependencies:
+``` 
+pip install "mirdata<=0.2.0"
+``` 
 
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/pzinemanas/APNet/settings). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
+Now you can clone and use APNet:
+``` 
+git clone https://github.com/pzinemanas/APNet.git
+cd APNet
+```
 
-### Support or Contact
+## Usage
 
-Having trouble with Pages? Check out our [documentation](https://docs.github.com/categories/github-pages-basics/) or [contact support](https://support.github.com/contact) and we’ll help you sort it out.
+### Download datasets
+``` 
+cd experiments
+python download_datasets.py -d UrbanSound8k
+
+```
+### Train models
+``` 
+python train.py -m APNet -d UrbanSound8k -f MelSpectrogram -fold fold1
+# Repeat for the other folds
+``` 
+
+### Evaluate models
+``` 
+python evaluate.py -m APNet -d UrbanSound8k -f MelSpectrogram
+``` 
