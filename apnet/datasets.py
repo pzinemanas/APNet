@@ -3,7 +3,7 @@ import numpy as np
 import csv
 from dcase_models.util.files import list_wav_files
 from dcase_models.data.dataset_base import Dataset
-import mirdata.medley_solos_db
+import mirdata
 
 
 class GoogleSpeechCommands(Dataset):
@@ -156,7 +156,9 @@ class MedleySolosDb(Dataset):
         self.label_list = ["clarinet", "distorted electric guitar", "female singer",
                            "flute", "piano", "tenor saxophone", "trumpet",
                            "violin"]
-        self.data = mirdata.medley_solos_db.load(data_home=self.dataset_path)
+        
+        self.mirdata = mirdata.initialize('medley_solos_db', data_home=self.dataset_path)                   
+        self.data = self.mirdata.load_tracks()
 
         self.file_lists = {}
 
@@ -180,8 +182,8 @@ class MedleySolosDb(Dataset):
         return y
 
     def download(self, force_download=False):
-        mirdata.medley_solos_db.download(self.dataset_path)
-        if mirdata.medley_solos_db.validate():
+        self.mirdata.download(cleanup=True, force_overwrite=force_download)
+        if self.mirdata.validate():
             self.set_as_downloaded()
 
     def upsample_train_set(self):
