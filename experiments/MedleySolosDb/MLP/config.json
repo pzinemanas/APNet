@@ -37,7 +37,7 @@
 
     "datasets" : {
         "MedleySolosDb" : {
-            "dataset_path" : "../datasets/Medley-solos-DB",
+            "dataset_path" : "../datasets/MedleySolosDb",
             "evaluation_mode" : "train-validate-test"
         }
     }
