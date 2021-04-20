@@ -4,6 +4,8 @@ import csv
 from dcase_models.util.files import list_wav_files
 from dcase_models.data.dataset_base import Dataset
 import mirdata.medley_solos_db
+from sed_eval.util.event_roll import event_list_to_event_roll
+from librosa.util import fix_length
 
 
 class GoogleSpeechCommands(Dataset):
@@ -205,3 +207,102 @@ class MedleySolosDb(Dataset):
                 for j in range(repetitions):
                     self.file_lists['train'].extend(files_by_class[class_ix])
         print(len(self.file_lists['train']))
+
+
+class DCASE2021Task5(Dataset):
+    """ DCASE2021Task5 dataset.
+
+    This class inherits all functionality from Dataset and
+    defines specific attributs and methods for DCASE2021Task5.
+
+    Url: https://zenodo.org/record/4543504#.YG8ZqBKxVH4
+
+    Parameters
+    ----------
+    dataset_path : str
+        Path to the dataset fold. This is the path to the folder where the
+        complete dataset will be downloaded, decompressed and handled.
+        It is expected to use a folder name that represents the dataset
+        unambiguously (e.g. ../datasets/DCASE2021Task5).
+
+    Examples
+    --------
+    To work with DCASE2021Task5 dataset, just initialize this class with the
+    path to the dataset.
+
+    >>> from dcase_models.data.datasets import DCASE2021Task5
+    >>> dataset = DCASE2021Task5('../datasets/DCASE2021Task5')
+
+    Then, you can download the dataset and change the sampling rate.
+
+    >>> dataset.download()
+    >>> dataset.change_sampling_rate(22050)
+
+    """
+
+    def __init__(self, dataset_path):
+        super().__init__(dataset_path)
+
+    def build(self):
+        self.audio_path = os.path.join(self.dataset_path, 'Development_Set_Audio')
+
+        self.fold_list = ["train", "validate"]
+        self.label_list = [
+            "AMRE","BBWA","BTBW","COYE","OVEN","RBGR","SWTH",
+            "GCTH","CHSP","SAVS","WTSP","GRN",
+            "GIG","SQT","CALL","SNMK","CCMK","AGGM","SOCM"
+        ]
+
+    def generate_file_lists(self):
+        for fold in self.fold_list:
+            if fold == 'train':
+                folder = "Training_Set"
+            else:
+                folder = "Validation_Set"
+            audio_folder = os.path.join(self.audio_path, folder)
+            self.file_lists[fold] = list_wav_files(audio_folder)
+
+    def get_annotations(self, file_name, features, time_resolution):
+        events = []
+        #./../datasets/DCASE2021Task5/Development_Set_Audio/Training_Set/BV/2015-10-14_23-59-59_unit05.wav
+        csv_filename = file_name.replace("Development_Set_Audio", "Development_Set_Annotations").replace('wav', 'csv')
+        with open(csv_filename) as csv_file:
+            csv_reader = csv.reader(csv_file, delimiter=',')
+            line_count = 0
+            for row in csv_reader:
+                if line_count == 0:
+                    header = row
+                    line_count += 1
+                    continue
+                event_onset = float(row[1])
+                event_offset = float(row[2])
+                for j in range(3, len(row)):
+                    class_name = header[j]
+                    if row[j] == 'POS':
+                        events.append({'event_label': class_name, 'event_onset': event_onset, 'event_offset': event_offset})
+                if (len(events) == 5) & (csv_filename.split('/')[-3]=='Validation_Set'):
+                    print("Load only first 5 events")
+                    break
+        label_list = self.label_list if csv_filename.split('/')[-3]=='Training_Set' else ['Q']
+        event_roll = event_list_to_event_roll(
+            events,
+            label_list,
+            time_resolution
+        )
+        if event_roll.shape[0] > features.shape[0]:
+            event_roll = event_roll[:len(features)]
+        else:
+            event_roll = fix_length(event_roll, features.shape[0], axis=0)
+        assert event_roll.shape[0] == features.shape[0] 
+        return event_roll
+
+    def download(self, force_download=False):
+        zenodo_url = "https://zenodo.org/record/4543504/files"
+        zenodo_files = [
+            "Development_Set_Annotations.zip",
+            "Development_Set_Audio.zip"]
+        downloaded = super().download(
+            zenodo_url, zenodo_files, force_download
+        )
+        if downloaded:
+            self.set_as_downloaded()

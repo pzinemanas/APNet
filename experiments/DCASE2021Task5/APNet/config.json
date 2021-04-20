@@ -1,0 +1,49 @@
+{
+    "features" : {
+        "MelSpectrogram" : {
+            "sequence_time": 0.52,
+            "sequence_hop_time":0.5,
+            "audio_hop":256,
+            "audio_win":1024,
+            "sr": 22050,
+            "mel_bands": 128,
+            "n_fft":1024,
+            "pad_mode" : "constant"
+        }
+    },
+
+    "train" : {
+        "early_stopping" : 100,
+        "epochs" : 200,
+        "considered_improvement" : 0.0,
+        "learning_rate" : 0.001,
+        "batch_size" : 32,
+        "buffer_size" : 2,
+        "verbose" : 1,
+        "optimizer" : "Adam"
+    },
+
+    "models" : {
+        "APNet" : {
+            "normalizer" : "minmax",
+            "model_arguments" : {
+                "filter_size_cnn" : [5,5],
+                "distance" : "euclidean",
+                "use_weighted_sum": 1,
+                "n_prototypes" : 38
+            },
+            "train_arguments": {
+                "loss_weights" : [10,5,5],
+                "init_last_layer" : 1
+            }          
+        }
+    },
+
+    "datasets" : {
+        "DCASE2021Task5" : {
+            "dataset_path" : "../datasets/DCASE2021Task5",
+            "evaluation_mode" : "train-validate-test"
+        }
+    }
+
+}

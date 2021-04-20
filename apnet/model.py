@@ -3,7 +3,7 @@ import os
 import json
 
 from keras.layers import Input, Lambda, Conv2D, MaxPooling2D, Dropout, Dense, Flatten, RNN, Reshape, Permute, Dot, LSTM, Softmax
-from keras.layers import LeakyReLU, UpSampling2D, Conv2DTranspose, Multiply, Activation,TimeDistributed
+from keras.layers import LeakyReLU, UpSampling2D, Conv2DTranspose, Multiply, Activation,TimeDistributed, Concatenate
 from keras.layers.normalization import BatchNormalization
 from keras.models import Model
 from keras.regularizers import l2, l1
@@ -674,6 +674,251 @@ class APNet(KerasModelContainer):
         self.model.get_layer('prototype_distances').set_weights([new_prototypes])
         self.model.get_layer('encoder').get_layer('conv3').set_weights([new_conv3,new_bias_conv3])
 
+
+class APNetFewShot(APNet):
+    """
+    Child class of ModelContainer with specific attributs and methods for
+    APNet model.
+
+    Attributes
+    ----------
+    prototypes : Prototypes
+        Instance that includes prototypes information for visualization
+        and debugging.
+    data_instances : DataInstances
+        Instance that includes data information for visualization
+        and debugging.
+
+    Methods
+    -------
+    get_prototypes(X_train, convert_audio_params=None, projection2D=None)
+        Extract prototypes from model (embeddings, mel-spectrograms and audio
+        if convert_audio_params is not None). Init self.prototypes instance. 
+
+    get_data_instances(X_feat, X_train, Y_train, Files_names_train)
+        Init self.data_instances object. Load data instances.
+        
+    debug_prototypes(self, X_train, force_get_prototypes=False)
+        Function to debug the model by eliminating similar prototypes
+    """
+
+    def __init__(self, model=None, model_path=None, metrics=['classification'],
+                 n_classes=10, n_frames_cnn=64, n_freq_cnn=128,
+                 filter_size_cnn=(5, 5), pool_size_cnn=(2,2),
+                 n_prototypes=50, logits_activation='softmax',
+                 dilation_rate=(1,1), distance='euclidean',
+                 use_weighted_sum=True, N_filters = [32,32,32],
+                 **kwargs):
+
+
+        super().__init__(model=model, model_path=model_path, metrics=metrics,
+                 n_classes=n_classes, n_frames_cnn=n_frames_cnn, n_freq_cnn=n_freq_cnn,
+                 filter_size_cnn=filter_size_cnn, pool_size_cnn=pool_size_cnn,
+                 n_prototypes=n_prototypes, logits_activation=logits_activation,
+                 dilation_rate=dilation_rate, distance=distance,
+                 use_weighted_sum=use_weighted_sum, N_filters = N_filters,
+                 **kwargs)
+
+
+    def build(self):
+        self.model_encoder = self.create_encoder()
+        decoder_input_shape = self.model_encoder.get_layer('conv3').output_shape[1:]    
+        mask1_shape = self.model_encoder.get_layer('mask1').input_shape[1:]
+        mask2_shape = self.model_encoder.get_layer('mask2').input_shape[1:]  
+
+        self.model_decoder = self.create_decoder(decoder_input_shape,mask1_shape,mask2_shape)
+
+        x = Input(shape=(self.n_frames_cnn,self.n_freq_cnn), dtype='float32', name='input')
+
+        feature_vectors, mask1, mask2 = self.model_encoder(x)
+        deconv = self.model_decoder([feature_vectors,mask1,mask2])
+
+        feature_vectors = Lambda(lambda x: x,name='features')(feature_vectors)
+
+        prototypes_per_class = int(self.n_prototypes/self.n_classes)
+        classes = []
+        for j in range(self.n_classes):
+            classes.append([j*prototypes_per_class, (j+1)*prototypes_per_class])
+        prototype_layer = PrototypeLayer(self.n_prototypes, classes, distance=self.distance,
+                                             name='prototype_distances', use_weighted_sum=self.use_weighted_sum)
+        prototype_distances = prototype_layer(feature_vectors)
+
+        similarity_fn = Lambda(lambda x: K.exp(-x), name='similarity_local') 
+        prototype_similarity = similarity_fn(prototype_distances)
+
+        if self.use_weighted_sum:
+            weightedsum = WeightedSum(name='mean')
+            mean = weightedsum(prototype_similarity)
+            logits = Dense(self.n_classes, use_bias=False, activation='linear', name='logits')(mean) 
+        else:
+            logits = Dense(self.n_classes, use_bias=False, activation='linear', name='logits')(prototype_similarity)
+                
+        out = Activation(activation=self.logits_activation, name='out')(logits)
+        
+        #prototype_distances_sum = Lambda(lambda x: K.sum(x,-1),name='prototype_distances_sum_freq')(prototype_distances_sum)
+
+        x_fs = Input(shape=(self.n_frames_cnn, self.n_freq_cnn), dtype='float32', name='input_fs')
+        x_fs_neg = Input(shape=(self.n_frames_cnn, self.n_freq_cnn), dtype='float32', name='input_fs_neg')
+        x_Q = Input(shape=(self.n_frames_cnn, self.n_freq_cnn), dtype='float32', name='input_Q')
+
+        features_fs, _, _ = self.model_encoder(x_fs)
+        distances_fs = prototype_layer(features_fs)
+        similarity_fs = similarity_fn(distances_fs)
+        if self.use_weighted_sum:
+            similarity_fs = weightedsum(similarity_fs)
+        mean_similarity_fs = Lambda(lambda x: K.mean(x, axis=0, keepdims=True), name='mean_similarity_fs')(similarity_fs)
+
+        features_fs_neg, _, _ = self.model_encoder(x_fs_neg)
+        distances_fs_neg = prototype_layer(features_fs_neg)
+        similarity_fs_neg = similarity_fn(distances_fs_neg)
+        if self.use_weighted_sum:
+            similarity_fs_neg = weightedsum(similarity_fs_neg)
+        mean_similarity_fs_neg = Lambda(lambda x: K.mean(x, axis=0, keepdims=True), name='mean_similarity_fs_neg')(similarity_fs_neg)
+
+        features_Q, _, _ = self.model_encoder(x_Q)
+        distances_Q = prototype_layer(features_Q)
+        similarity_Q = similarity_fn(distances_Q)
+        if self.use_weighted_sum:
+            similarity_Q = weightedsum(similarity_Q)
+
+        #decision_fn = Lambda(lambda x: K.sum(K.pow(x[0] - x[1], 2), axis=-1, keepdims=True), name='decision_fn')([similarity_Q, mean_similarity_fs])
+        #decision_fn = Lambda(lambda x: K.pow(x[0] - x[1], 2), name='decision_fn')([similarity_Q, mean_similarity_fs])
+        #decision_fn = Lambda(lambda x: x[0] - x[1], name='decision_fn')([similarity_Q, mean_similarity_fs])
+        #decision_fn = Lambda(lambda x: K.pow(x[0] - x[1], 2) - K.pow(x[0] - x[2], 2), name='decision_fn')([similarity_Q, mean_similarity_fs, mean_similarity_fs_neg])
+
+        decision_fn = Lambda(lambda x: K.exp(-K.sum(K.pow(x[0] - x[1], 2), axis=-1, keepdims=True)), name='decision_fn')([similarity_Q, mean_similarity_fs])
+        decision_fn_neg = Lambda(lambda x: K.exp(-K.sum(K.pow(x[0] - x[1], 2), axis=-1, keepdims=True)), name='decision_fn_neg')([similarity_Q, mean_similarity_fs_neg])
+
+        decision_fn = Concatenate()([decision_fn_neg, decision_fn])
+
+        out_Q = Activation(activation='sigmoid', name='out_Q')(decision_fn)
+
+        #out_Q = Dense(2, activation='softmax')(decision_fn)
+        #decision_fn = Lambda(lambda x: x - 0.5, name='decision_fn1')(decision_fn)#
+        #decision_fn = BatchNormalization()(decision_fn)
+        #out_Q = Activation(activation='sigmoid', name='out_Q')(decision_fn)
+
+        self.model = Model(inputs=[x, x_fs, x_fs_neg, x_Q], outputs=[out, deconv, prototype_distances, out_Q])
+                
+    def train(self, data_train, data_val, weights_path='./',
+              optimizer='Adam', learning_rate=0.001, early_stopping=100,
+              considered_improvement=0.01,
+              loss_weights=[10,5,5,5], sequence_time_sec=0.5,
+              metric_resolution_sec=1.0, label_list=[],
+              shuffle=True, init_last_layer=False,
+              **kwargs_keras_fit):
+
+        """
+        Specific training function for APNet model
+        """
+    #    n_classes = data_train[1].shape[1]
+        n_classes = len(label_list)
+        # define optimizer and compile
+        losses = ['categorical_crossentropy'] + ['mean_squared_error'] + [prototype_loss] + ['categorical_crossentropy']  #
+
+        # get number of prototypes and freq dimension of feature space
+        features_shape = self.model.get_layer('features').output.get_shape().as_list()
+        n_freqs_autoencoder = features_shape[2]
+        prototypes_shape = self.model.get_layer('mean_similarity_fs').output.get_shape().as_list()
+        n_prototypes = prototypes_shape[1]
+ #       n_instances_train = len(data_train[0])
+ #       n_instances_val = len(data_val[0])
+
+        # Init last layer
+        if init_last_layer:   
+            print('initialize last layer') 
+            W = np.zeros((n_prototypes,n_classes))
+            prototypes_per_class = int(n_prototypes / float(n_classes))
+            print('prototypes_per_class', prototypes_per_class)
+            for j in range(n_classes):
+                W[prototypes_per_class*j:prototypes_per_class*(j+1),j] = 1/float(prototypes_per_class)#-1/float(prototypes_per_class)
+                W[:prototypes_per_class*j,j] = -1/float(prototypes_per_class) #+1/float(prototypes_per_class)
+                W[prototypes_per_class*(j+1):,j] = -1/float(prototypes_per_class)  #+1/float(prototypes_per_class)    
+            W = W + 0.1*(np.random.rand(W.shape[0],W.shape[1]) - 0.5)
+            self.model.get_layer('logits').set_weights([W]) 
+            #self.model.get_layer('logits').trainable = False
+
+        import keras.optimizers as optimizers
+        optimizer_function = getattr(optimizers, optimizer)
+        opt = optimizer_function(lr=learning_rate)
+
+        self.model.compile(loss=losses, optimizer=opt,
+                           loss_weights=loss_weights)
+
+        file_weights = os.path.join(weights_path, 'best_weights.hdf5')
+        file_log = os.path.join(weights_path, 'training.log')
+        
+        kwargs_keras_fit.pop('buffer_size')
+        print(kwargs_keras_fit)
+        self.model.fit(
+            x=data_train[0], y=data_train[1], shuffle=False,
+            #callbacks=[metrics_callback, log],
+            #validation_data=validation_data,
+            **kwargs_keras_fit
+        )
+        self.model.save_weights(file_weights)
+
+        # if self.metrics[0] == 'classification':
+        #     metrics_callback = ClassificationCallback(
+        #         data_val, file_weights=file_weights,
+        #         early_stopping=early_stopping,
+        #         considered_improvement=considered_improvement,
+        #         label_list=label_list
+        #     )
+        # elif self.metrics[0] == 'sed':
+        #     metrics_callback = SEDCallback(
+        #         data_val, file_weights=file_weights,
+        #         early_stopping=early_stopping,
+        #         considered_improvement=considered_improvement,
+        #         sequence_time_sec=sequence_time_sec,
+        #         metric_resolution_sec=metric_resolution_sec,
+        #         label_list=label_list
+        #     )
+        # elif self.metrics[0] == 'tagging':
+        #     metrics_callback = TaggingCallback(
+        #         data_val, file_weights=file_weights,
+        #         early_stopping=early_stopping,
+        #         considered_improvement=considered_improvement,
+        #         label_list=label_list
+        #     )
+        # else:
+        #     metrics_callback = ModelCheckpoint(
+        #         filepath=file_weights,
+        #         save_weights_only=True,
+        #         monitor='val_loss',
+        #         mode='min',
+        #         save_best_only=True,
+        #         verbose=1)
+
+        # log = CSVLogger(file_log)
+        # kwargs_keras_fit.pop('buffer_size')
+        # validation_data = None
+        # if metrics_callback.__class__ is ModelCheckpoint:
+        #     if data_val.__class__ is DataGenerator:
+        #         validation_data = KerasDataGenerator(data_val)
+        #     else:
+        #         validation_data = data_val
+        # if type(data_train) in [list, tuple]:
+        #     self.model.fit(
+        #         x=data_train[0], y=data_train[1], shuffle=shuffle,
+        #         callbacks=[metrics_callback, log],
+        #         validation_data=validation_data,
+        #         **kwargs_keras_fit
+        #     )
+        # else:
+        #     if data_train.__class__ is DataGenerator:
+        #         data_train = KerasDataGenerator(data_train)
+        #     kwargs_keras_fit.pop('batch_size')
+            
+        #     self.model.fit_generator(
+        #         generator=data_train,
+        #         callbacks=[metrics_callback, log],
+        #         validation_data=validation_data,
+        #         shuffle=False,
+        #         **kwargs_keras_fit
+        #         # use_multiprocessing=True,
+        #         # workers=6)
+        #     )
 
 class AttRNNSpeechModel(KerasModelContainer):
      # https://github.com/douglas125/SpeechCmdRecognition/blob/master/SpeechModels.py

@@ -2,15 +2,17 @@ import os
 import argparse
 import sys
 import numpy as np
+from imblearn.over_sampling import RandomOverSampler 
+from numpy.random import default_rng
 
 sys.path.append('../')
 # Datasets
-from apnet.datasets import MedleySolosDb, GoogleSpeechCommands
+from apnet.datasets import MedleySolosDb, GoogleSpeechCommands, DCASE2021Task5
 from dcase_models.data.datasets import UrbanSound8k
 
 # Models
 from dcase_models.model.models import SB_CNN, MLP
-from apnet.model import APNet, AttRNNSpeechModel
+from apnet.model import APNet, AttRNNSpeechModel, APNetFewShot
 
 # Features
 from dcase_models.data.features import MelSpectrogram, Openl3
@@ -25,6 +27,7 @@ from dcase_models.util.data import evaluation_setup
 
 
 available_models = {
+    'APNetFewShot' : APNetFewShot,
     'APNet' :  APNet,
     'SB_CNN' : SB_CNN,
     'MLP' : MLP,
@@ -39,7 +42,8 @@ available_features = {
 available_datasets = {
     'UrbanSound8k' :  UrbanSound8k,
     'MedleySolosDb' : MedleySolosDb,
-    'GoogleSpeechCommands' : GoogleSpeechCommands
+    'GoogleSpeechCommands' : GoogleSpeechCommands,
+    'DCASE2021Task5' : DCASE2021Task5
 }
 
 def main():
@@ -139,7 +143,7 @@ def main():
         use_validate_set=True
     )
 
-    if model_name == 'APNet':
+    if (model_name == 'APNet') | (model_name == 'APNetFewShot'):
         outputs = ['annotations', features, 'zeros']
     else:
         outputs = 'annotations'
@@ -147,6 +151,7 @@ def main():
     data_gen_train = DataGenerator(
         dataset, features, folds=folds_train,#+['validate'],
         batch_size=params['train']['batch_size'],
+        buffer_size=params['train']['buffer_size'],
         shuffle=True, train=True, scaler=None,
         outputs=outputs
     )
@@ -200,9 +205,13 @@ def main():
     # Pass scaler to data_gen_train to be used when data
     # loading
 
+    if args.dataset == 'DCASE2021Task5':
+        folds_val = ["train"]
+
     data_gen_val = DataGenerator(
         dataset, features, folds=folds_val,
         batch_size=params['train']['batch_size'],
+        buffer_size=params['train']['buffer_size'],
         shuffle=False, train=False, scaler=scaler
     )
 
@@ -222,6 +231,103 @@ def main():
     # Set paths
     exp_folder = os.path.join(model_folder, args.fold_name)
     mkdir_if_not_exists(exp_folder, parents=True)
+
+    # Save model json and scaler
+    save_pickle(scaler, os.path.join(exp_folder, 'scaler.pickle'))
+
+    if (args.dataset == 'UrbanSound8k') | (args.dataset == 'DCASE2021Task5'):
+        # Upload all data to RAM only for this dataset
+        print('Getting data...')
+        data_gen_train = data_gen_train.get_data()
+        print('Done!')
+
+    if args.dataset == 'DCASE2021Task5':
+        X_train = data_gen_train[0]
+        Y_train = data_gen_train[1][0]
+        zeros = data_gen_train[1][2]
+        del data_gen_train
+        
+        print(X_train.shape, zeros.shape, Y_train.shape)
+        X_train = X_train[np.sum(Y_train, axis=1) > 0]
+        Y_train = Y_train[np.sum(Y_train, axis=1) > 0]
+        print(X_train.shape, zeros.shape, Y_train.shape)
+
+        number_of_instances = np.zeros(19)
+        for j in range(19):
+            number_of_instances[j] = np.sum(Y_train[:, j] == 1)
+
+        print(number_of_instances)
+        selected_classes = np.argwhere(number_of_instances > 60)
+        n_classes = len(selected_classes)
+        print(n_classes)
+
+        Y_train = Y_train[:, selected_classes]
+        print(Y_train.shape)
+
+        ros = RandomOverSampler(random_state=42)
+        Y_train = np.argmax(Y_train, axis=1)
+        X_train_shape = X_train.shape
+        X_train = np.reshape(X_train, (len(X_train), -1))
+        print(X_train.shape, Y_train.shape)
+        X_train, Y_train2 = ros.fit_resample(X_train, Y_train)
+        X_train = np.reshape(X_train, (len(X_train), X_train_shape[1], X_train_shape[2]))
+        
+        #Y_train2 = np.argmax(Y_train, axis=1)
+
+        Nc = 10
+        Nway = 5
+        bs = params['train']['batch_size']
+        n_batches = int(len(X_train)/bs)
+        length = int(n_batches*bs)
+        X = np.zeros((length, X_train.shape[1], X_train.shape[2]))
+        Xfs = np.zeros((length, X_train.shape[1], X_train.shape[2]))
+        Xfs_neg = np.zeros((length, X_train.shape[1], X_train.shape[2]))
+        XQ = np.zeros((length, X_train.shape[1], X_train.shape[2]))
+        outQ = np.zeros((length, 2))
+        zeros = np.zeros(length)
+        Y_train = np.zeros((length, n_classes))
+        samples_per_class = int(bs / Nc)
+        rng = default_rng()
+        classes = rng.choice(n_classes, size=n_classes, replace=False)
+        support_classes = classes[:Nc]
+        query_classses = classes[Nc:]
+        for j in range(n_batches):
+            for ix_c, c in enumerate(support_classes):
+                indexes = np.argwhere(Y_train2 == c)[:,0]
+                batch_indexes = indexes[rng.choice(len(indexes), size=samples_per_class, replace=False)]
+                X[j*bs+ix_c*samples_per_class:j*bs+ix_c*samples_per_class+samples_per_class] = X_train[batch_indexes]
+                Y_train[j*bs+ix_c*samples_per_class:j*bs+ix_c*samples_per_class+samples_per_class, c] = 1
+            
+            #Query dataset
+            query_class = query_classses[np.random.randint(len(query_classses))]
+            indexes = np.argwhere(Y_train2 == query_class)[:,0]
+            if len(indexes) < bs+int(bs/2):
+                print(query_class)
+            batch_indexes = indexes[rng.choice(len(indexes), size=bs+int(bs/2), replace=False)]
+            Xfs[j*bs:(j+1)*bs] = X_train[batch_indexes[:bs]]
+            XQ[j*bs:j*bs+int(bs/2)] = X_train[batch_indexes[bs:]]
+            outQ[j*bs:j*bs+int(bs/2), 1] = 1
+            indexes = np.argwhere(Y_train2 != query_class)[:,0]
+            batch_neg_indexes = indexes[rng.choice(len(indexes), size=int(bs/2), replace=False)]
+            XQ[j*bs+int(bs/2):(j+1)*bs] = X_train[batch_neg_indexes]
+            outQ[j*bs+int(bs/2):(j+1)*bs, 0] = 1
+
+            batch_neg_indexes = indexes[rng.choice(len(indexes), size=bs, replace=False)]
+            Xfs_neg[j*bs:(j+1)*bs] = X_train[batch_neg_indexes]
+
+        data_gen_train = ([X, Xfs, Xfs_neg, XQ], [Y_train, X, zeros, outQ])
+
+        # X_val, Y_val = data_gen_val.get_data()
+        # X_val_list = []
+        # Y_val_list = []
+        # for j in range(len(X_val)):
+        #     for k in range(len(X_val[j])):
+        #         if np.sum(Y_val[j][k]) > 0:
+        #             X_val_list.append(np.expand_dims(X_val[j][k], 0))
+        #             Y_val_list.append(np.expand_dims(Y_val[j][k], 0))
+            #print(X_val[j].shape, Y_val[j].shape)
+    
+    label_list = [dataset.label_list[int(j)] for j in selected_classes]
 
     if args.continue_training:
         model_container = model_class(
@@ -252,19 +358,11 @@ def main():
 
     model_container.model.summary()
 
-    # Save model json and scaler
-    save_pickle(scaler, os.path.join(exp_folder, 'scaler.pickle'))
-
-    if args.dataset == 'UrbanSound8k':
-        # Upload all data to RAM only for this dataset
-        print('Getting data...')
-        data_gen_train = data_gen_train.get_data()
-        print('Done!')
 
     # Train model
     model_container.train(
-        data_gen_train, data_gen_val,
-        label_list=dataset.label_list,
+        data_gen_train, (None, None),# (X_val_list, Y_val_list),
+        label_list=label_list,
         weights_path=exp_folder, **params['train'],
         sequence_time_sec=params_features['sequence_hop_time'],
         **params_model['train_arguments']

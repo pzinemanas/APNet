@@ -6,14 +6,15 @@ import numpy as np
 sys.path.append('../')
 
 # Datasets
-from apnet.datasets import MedleySolosDb, GoogleSpeechCommands
+from apnet.datasets import MedleySolosDb, GoogleSpeechCommands, DCASE2021Task5
 from dcase_models.data.datasets import UrbanSound8k
 
 
 available_datasets = {
     'UrbanSound8k' :  UrbanSound8k,
     'MedleySolosDb' : MedleySolosDb,
-    'GoogleSpeechCommands' : GoogleSpeechCommands
+    'GoogleSpeechCommands' : GoogleSpeechCommands,
+    'DCASE2021Task5' : DCASE2021Task5
 }
 
 def main():
