@@ -99,7 +99,7 @@ class GoogleSpeechCommands(Dataset):
         tensorflow_url = "http://download.tensorflow.org/data/"
         tensorflow_files = [
             "speech_commands_v0.02.tar.gz",
-            "speech_commands_test_set_v0.02.tar.gz"ç
+            "speech_commands_test_set_v0.02.tar.gz"
         ]
         downloaded = super().download(
             tensorflow_url, tensorflow_files, force_download
