@@ -87,11 +87,6 @@ class GoogleSpeechCommands(Dataset):
                 continue
             else:
                 self.file_lists['train'].append(wav_file)
-        #print(len(validation_list), len(test_list), len(all_files))
-        #print(all_files[0].endswith('forward/ea0cf37f_nohash_1.wav'))
-        #for fold in self.fold_list:
-        #    audio_folder = os.path.join(self.audio_path, fold)
-        #    self.file_lists[fold] = list_wav_files(audio_folder)
 
     def get_annotations(self, file_name, features, time_resolution):
         y = np.zeros((len(features), len(self.label_list)))
@@ -101,7 +96,16 @@ class GoogleSpeechCommands(Dataset):
         return y
 
     def download(self, force_download=False):
-        pass
+        tensorflow_url = "http://download.tensorflow.org/data/"
+        tensorflow_files = [
+            "speech_commands_v0.02.tar.gz",
+            "speech_commands_test_set_v0.02.tar.gz"ç
+        ]
+        downloaded = super().download(
+            tensorflow_url, tensorflow_files, force_download
+        )
+        if downloaded:
+            self.set_as_downloaded()
 
 
 
