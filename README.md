@@ -35,7 +35,7 @@ pip install .
 
 Install other dependencies:
 ``` 
-pip install "mirdata<=0.2.0"
+pip install "mirdata>=0.3.0"
 ``` 
 
 Now you can clone and use APNet:

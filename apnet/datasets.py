@@ -4,6 +4,9 @@ import csv
 from dcase_models.util.files import list_wav_files
 from dcase_models.data.dataset_base import Dataset
 import mirdata
+import logging
+
+logging.getLogger('sox').setLevel(logging.ERROR)
 
 
 class GoogleSpeechCommands(Dataset):
