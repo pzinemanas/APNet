@@ -171,15 +171,11 @@ class MedleySolosDb(Dataset):
         
         for track_id, track_data in self.data.items():  
             self.file_lists[fold_tran[track_data.subset]].append(track_data.audio_path)
-            #print(track_data)
             self.file_to_class[track_data.audio_path] = track_data.instrument_id
 
     def get_annotations(self, file_name, features, time_resolution):
         y = np.zeros((len(features), len(self.label_list)))
-        #word = file_name.split('/')[-2]
-        #class_ix = int(self.label_list.index(word))
         class_ix = self.file_to_class[file_name]
-        #print(class_ix)
         y[:, class_ix] = 1
         return y
 
@@ -192,7 +188,6 @@ class MedleySolosDb(Dataset):
         n_instances = np.zeros(len(self.label_list), dtype=int)
         files_by_class = {x: [] for x in range(len(self.label_list))}
         for track_id, track_data in self.data.items():
-          #  print(track_data.subset)
             if track_data.subset != 'training':
                 continue
             n_instances[track_data.instrument_id] += 1
