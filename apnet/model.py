@@ -10,7 +10,7 @@ from keras.regularizers import l2, l1
 import keras.backend as K
 
 from keras.optimizers import Adam
-from keras.callbacks import ModelCheckpoint,CSVLogger
+from keras.callbacks import ModelCheckpoint, CSVLogger
 from keras.models import model_from_json
 import keras.backend as K
 
@@ -77,84 +77,76 @@ class APNet(KerasModelContainer):
 
     def build(self):
         self.model_encoder = self.create_encoder()
+        
         decoder_input_shape = self.model_encoder.get_layer('conv3').output_shape[1:]    
         mask1_shape = self.model_encoder.get_layer('mask1').input_shape[1:]
         mask2_shape = self.model_encoder.get_layer('mask2').input_shape[1:]  
 
-        self.model_decoder = self.create_decoder(decoder_input_shape,mask1_shape,mask2_shape)
+        self.model_decoder = self.create_decoder(decoder_input_shape, mask1_shape, mask2_shape)
 
-        x = Input(shape=(self.n_frames_cnn,self.n_freq_cnn), dtype='float32', name='input')
+        x = Input(shape=(self.n_frames_cnn, self.n_freq_cnn), dtype='float32', name='input')
 
-        feature_vectors, mask1, mask2 = self.model_encoder(x)
-        deconv = self.model_decoder([feature_vectors,mask1,mask2])
+        latent_features, mask1, mask2 = self.model_encoder(x)
+        reconstructed_input = self.model_decoder([latent_features, mask1, mask2])
 
-        feature_vectors = Lambda(lambda x: x,name='features')(feature_vectors)
+        latent_features = Lambda(lambda x: x, name='features')(latent_features)
 
-        prototypes_per_class = int(self.n_prototypes/self.n_classes)
-        classes = []
-        for j in range(self.n_classes):
-            classes.append([j*prototypes_per_class, (j+1)*prototypes_per_class])
-        prototype_distances = PrototypeLayer(self.n_prototypes, classes, distance=self.distance,
-                                             name='prototype_distances', use_weighted_sum=self.use_weighted_sum)(feature_vectors)
+        distances = PrototypeLayer(
+            self.n_prototypes,
+            distance=self.distance,
+            name='prototype_distances',
+            use_weighted_sum=self.use_weighted_sum
+        )(latent_features)
 
-        #prototype_similarity = Lambda(lambda x: K.log((x+1)/(x +K.epsilon())),name='similarity')(prototype_distances)#K.log((distance+1)/(distance+K.epsilon())) #
-        #prototype_similarity = Lambda(lambda x: 1/(1+K.exp(x)),name='similarity')(prototype_distances)#K.log((distance+1)/(distance+K.epsilon())) #
-
-        prototype_similarity_local = Lambda(lambda x: K.exp(-x),name='similarity_local')(prototype_distances)
+        similarity = Lambda(lambda x: K.exp(-x), name='similarity_local')(distances)
 
         if self.distance == 'euclidean_patches':
-            prototype_distances_sum = Lambda(lambda x: K.mean(x,2),name='prototype_distances_sum')(prototype_distances) #sum (25/01/2021)
-            prototype_similarity_global = Lambda(lambda x: K.exp(-x),name='similarity_global')(prototype_distances_sum)
-            prototype_similarity_local = Lambda(lambda x: K.max(x,(2,3)),name='maxpool_proto')(prototype_similarity_local)  
+            distances_sum = Lambda(lambda x: K.mean(x, 2), name='prototype_distances_sum')(distances)
+            similarity_global = Lambda(lambda x: K.exp(-x), name='similarity_global')(prototype_distances_sum)
+            similarity = Lambda(lambda x: K.max(x, (2,3)), name='maxpool_proto')(similarity)  
         else:
-            prototype_distances_sum = Lambda(lambda x: x)(prototype_distances)
+            distances_sum = Lambda(lambda x: x)(distances)
 
         if self.use_weighted_sum:
             if self.distance == 'euclidean_patches':
-                mean = WeightedSum(name='mean')(prototype_similarity_global)
-                #mean = WeightedSumDistances(name='sum0')([mean, prototype_similarity_local])
-                mean = Lambda(lambda x: x[0]+x[1],name='sum0')([mean,prototype_similarity_local])
+                mean = WeightedSum(name='mean')(similarity_global)
+                mean = Lambda(lambda x: x[0] + x[1], name='sum0')([mean, similarity])
 
             else:
-                mean = WeightedSum(name='mean')(prototype_similarity_local)
-            logits = Dense(self.n_classes, use_bias=False, activation='linear', name='logits')(mean) #kernel_regularizer=l1(0.001) 
+                mean = WeightedSum(name='mean')(similarity)
+            logits = Dense(self.n_classes, use_bias=False, activation='linear', name='logits')(mean) 
         else:
-            logits = Dense(self.n_classes, use_bias=False, activation='linear', name='logits')(prototype_similarity_local)
+            logits = Dense(self.n_classes, use_bias=False, activation='linear', name='logits')(similarity)
                 
         out = Activation(activation=self.logits_activation, name='out')(logits)
-        
-        #prototype_distances_sum = Lambda(lambda x: K.sum(x,-1),name='prototype_distances_sum_freq')(prototype_distances_sum)
 
-        self.model = Model(inputs=x, outputs=[out, deconv, prototype_distances_sum])
+        self.model = Model(inputs=x, outputs=[out, reconstructed_input, distances_sum])
                 
         super().build()
 
 
     def create_encoder(self, activation = 'linear', name='encoder', use_batch_norm=False):
-        #n_prototypes = prototypes_per_class * n_classes
-        #SegNet: A Deep ConvolutionalEncoder-Decoder Architecture for ImageSegmentation
-
-        x = Input(shape=(self.n_frames_cnn,self.n_freq_cnn), dtype='float32', name='input')
-        y = Lambda(lambda x: K.expand_dims(x,-1),name='expand_dims')(x)
-        y = Conv2D(self.N_filters[0], self.filter_size_cnn, padding='same', activation=activation, name='conv1',dilation_rate=self.dilation_rate)(y)
+        x = Input(shape=(self.n_frames_cnn, self.n_freq_cnn), dtype='float32', name='input')
+        y = Lambda(lambda x: K.expand_dims(x,-1), name='expand_dims')(x)
+        y = Conv2D(self.N_filters[0], self.filter_size_cnn, padding='same', activation=activation, name='conv1', dilation_rate=self.dilation_rate)(y)
         if use_batch_norm:
             y = BatchNormalization()(y) 
         y = LeakyReLU(name='leaky_relu1')(y)
         orig = y
         y = MaxPooling2D(pool_size=self.pool_size_cnn, name='maxpool1')(y)
         y_up = UpSampling2D(size=self.pool_size_cnn, name='upsampling1')(y)
-        bool_mask1 = Lambda(lambda t: K.greater_equal(t[0], t[1]),name='bool_mask1')([orig,y_up])
-        mask1 = Lambda(lambda t: K.cast(t, dtype='float32'),name='mask1')(bool_mask1)
+        bool_mask1 = Lambda(lambda t: K.greater_equal(t[0], t[1]), name='bool_mask1')([orig, y_up])
+        mask1 = Lambda(lambda t: K.cast(t, dtype='float32'), name='mask1')(bool_mask1)
 
-        y = Conv2D(self.N_filters[1], self.filter_size_cnn, padding='same', activation=activation, name='conv2',dilation_rate=self.dilation_rate)(y)
+        y = Conv2D(self.N_filters[1], self.filter_size_cnn, padding='same', activation=activation, name='conv2', dilation_rate=self.dilation_rate)(y)
         if use_batch_norm:
             y = BatchNormalization()(y) 
         y = LeakyReLU(name='leaky_relu2')(y)
         orig = y
         y = MaxPooling2D(pool_size=self.pool_size_cnn, name='maxpool2')(y)
         y_up = UpSampling2D(size=self.pool_size_cnn, name='upsampling2')(y)
-        bool_mask2 = Lambda(lambda t: K.greater_equal(t[0], t[1]),name='bool_mask2')([orig,y_up])
-        mask2 = Lambda(lambda t: K.cast(t, dtype='float32'),name='mask2')(bool_mask2)    
+        bool_mask2 = Lambda(lambda t: K.greater_equal(t[0], t[1]), name='bool_mask2')([orig, y_up])
+        mask2 = Lambda(lambda t: K.cast(t, dtype='float32'), name='mask2')(bool_mask2)    
         
         y = Conv2D(self.N_filters[2], self.filter_size_cnn, padding='same', activation=activation, name='conv3')(y)
         if use_batch_norm:
@@ -164,7 +156,7 @@ class APNet(KerasModelContainer):
         model = Model(inputs=x, outputs=[y, mask1, mask2], name=name)
         return model
 
-    def create_decoder(self,input_shape,mask1_shape, mask2_shape,
+    def create_decoder(self, input_shape, mask1_shape, mask2_shape,
                        activation = 'linear', final_activation='tanh',
                        name='decoder', use_batch_norm=False, N_filters_out=1):
     
@@ -175,28 +167,23 @@ class APNet(KerasModelContainer):
         deconv = Conv2DTranspose(self.N_filters[1], self.filter_size_cnn, padding='same', activation=activation, name='deconv1')(x) 
         deconv = UpSampling2D(size=self.pool_size_cnn, name='upsampling2_1')(deconv)
         deconv = Multiply(name='multiply2')([mask2, deconv]) 
-        #if use_batch_norm:
-        #    deconv = BatchNormalization()(deconv)   
         deconv = LeakyReLU(name='leaky_relu4')(deconv)
 
         deconv = Conv2DTranspose(self.N_filters[0], self.filter_size_cnn, padding='same', activation=activation, name='deconv2')(deconv)     
         deconv = UpSampling2D(size=self.pool_size_cnn, name='upsampling3_1')(deconv)
         deconv = Multiply(name='multiply3')([mask1, deconv])    
-    # if use_batch_norm:
-    #     deconv = BatchNormalization()(deconv) 
         deconv = LeakyReLU(name='leaky_relu5')(deconv)
 
         deconv = Conv2DTranspose(N_filters_out, self.filter_size_cnn, padding='same', activation='linear', name='deconv3')(deconv)
 
         if N_filters_out == 1:
-            deconv = Lambda(lambda x: K.squeeze(x, axis=-1),name='input_reconstructed')(deconv)
+            deconv = Lambda(lambda x: K.squeeze(x, axis=-1), name='input_reconstructed')(deconv)
 
         if use_batch_norm:
-            #deconv = LeakyReLU(name='leaky_relu6')(deconv)
             deconv = BatchNormalization()(deconv) 
         deconv = Activation(final_activation, name='final_activation')(deconv)
 
-        model = Model(inputs=[x,mask1,mask2], outputs=deconv, name=name)        
+        model = Model(inputs=[x, mask1, mask2], outputs=deconv, name=name)        
         return model
 
     def train(self, data_train, data_val, weights_path='./',
@@ -210,32 +197,32 @@ class APNet(KerasModelContainer):
         """
         Specific training function for APNet model
         """
-    #    n_classes = data_train[1].shape[1]
         n_classes = len(label_list)
         # define optimizer and compile
-        losses = ['categorical_crossentropy'] + ['mean_squared_error'] + [prototype_loss] #+ ['mean_squared_error']  #
+        losses = [
+            'categorical_crossentropy',
+            'mean_squared_error',
+            prototype_loss
+        ]
 
         # get number of prototypes and freq dimension of feature space
         features_shape = self.model.get_layer('features').output.get_shape().as_list()
         n_freqs_autoencoder = features_shape[2]
         prototypes_shape = self.model.get_layer('prototype_distances').output.get_shape().as_list()
         n_prototypes = prototypes_shape[1]
- #       n_instances_train = len(data_train[0])
- #       n_instances_val = len(data_val[0])
 
         # Init last layer
         if init_last_layer:   
             print('initialize last layer') 
-            W = np.zeros((n_prototypes,n_classes))
+            W = np.zeros((n_prototypes, n_classes))
             prototypes_per_class = int(n_prototypes / float(n_classes))
             print('prototypes_per_class', prototypes_per_class)
             for j in range(n_classes):
-                W[prototypes_per_class*j:prototypes_per_class*(j+1),j] = 1/float(prototypes_per_class)#-1/float(prototypes_per_class)
-                W[:prototypes_per_class*j,j] = -1/float(prototypes_per_class) #+1/float(prototypes_per_class)
-                W[prototypes_per_class*(j+1):,j] = -1/float(prototypes_per_class)  #+1/float(prototypes_per_class)    
-            W = W + 0.1*(np.random.rand(W.shape[0],W.shape[1]) - 0.5)
+                W[prototypes_per_class*j:prototypes_per_class*(j+1), j] = 1/float(prototypes_per_class)
+                W[:prototypes_per_class*j, j] = -1/float(prototypes_per_class)
+                W[prototypes_per_class*(j+1):, j] = -1/float(prototypes_per_class)   
+            W = W + 0.1*(np.random.rand(W.shape[0], W.shape[1]) - 0.5)
             self.model.get_layer('logits').set_weights([W]) 
-            #self.model.get_layer('logits').trainable = False
 
         super().train(
             data_train, data_val,
@@ -250,7 +237,7 @@ class APNet(KerasModelContainer):
         )
 
     def model_input_to_embeddings(self):
-        input_shape = self.model.layers[0].output_shape[1:] #model.get_layer('input').output_shape[1:]  #conv3    
+        input_shape = self.model.layers[0].output_shape[1:]  
         x = Input(shape=input_shape, dtype='float32')
 
         feature_vectors, mask1, mask2 = self.model.get_layer('encoder')(x)
@@ -260,11 +247,11 @@ class APNet(KerasModelContainer):
         return model     
 
     def model_input_to_distances(self, return_all=False):
-        input_shape = self.model.layers[0].output_shape[1:] #model.get_layer('input').output_shape[1:]  #conv3    
+        input_shape = self.model.layers[0].output_shape[1:]  
         x = Input(shape=input_shape, dtype='float32')
 
         feature_vectors, mask1, mask2 = self.model.get_layer('encoder')(x)
-        deconv = self.model.get_layer('decoder')([feature_vectors,mask1,mask2])
+        deconv = self.model.get_layer('decoder')([feature_vectors, mask1, mask2])
         features = self.model.get_layer('features')(feature_vectors)  
         prototype_distances = self.model.get_layer('prototype_distances')(feature_vectors) 
 
@@ -280,7 +267,7 @@ class APNet(KerasModelContainer):
         if self.use_weighted_sum:
             if self.distance == 'euclidean_patches':
                 prototype_similarity_global_mean = self.model.get_layer('mean')(prototype_similarity_global)
-                mean = self.model.get_layer('sum0')([prototype_similarity_global_mean,prototype_similarity_local_max])
+                mean = self.model.get_layer('sum0')([prototype_similarity_global_mean, prototype_similarity_local_max])
             else:
                 mean = self.model.get_layer('mean')(prototype_similarity_local)
             logits = self.model.get_layer('logits')(mean)  
@@ -293,18 +280,13 @@ class APNet(KerasModelContainer):
         else:
             model = Model(
                 inputs=x,
-                outputs=[
-                    #prototype_similarity_global,
-                    #prototype_similarity_global_mean,
-                    mean,
-                    prototype_similarity_local]
-                    #prototype_similarity_local_max]
+                outputs=[mean, prototype_similarity_local]
                 )
 
         return model
 
     def model_embeddings_to_out(self):
-        input_shape = self.model.get_layer('encoder').get_layer('conv3').output_shape[1:]  #conv3
+        input_shape = self.model.get_layer('encoder').get_layer('conv3').output_shape[1:]
         x = Input(shape=input_shape, dtype='float32')
 
         prototype_distances = self.model.get_layer('prototype_distances')(x)
@@ -321,7 +303,7 @@ class APNet(KerasModelContainer):
         if self.use_weighted_sum:
             if self.distance == 'euclidean_patches':
                 mean = self.model.get_layer('mean')(prototype_similarity_global)
-                mean = self.model.get_layer('sum0')([mean,prototype_similarity_local])
+                mean = self.model.get_layer('sum0')([mean, prototype_similarity_local])
             else:
                 mean = self.model.get_layer('mean')(prototype_similarity_local)
             logits = self.model.get_layer('logits')(mean)  
@@ -329,7 +311,7 @@ class APNet(KerasModelContainer):
             logits = self.model.get_layer('logits')(prototype_similarity_local)        
         out = self.model.get_layer('out')(logits)
 
-        model = Model(inputs=x, outputs=[out,mean])     #prototype_distances
+        model = Model(inputs=x, outputs=[out, mean])
         return model   
 
                 
@@ -342,50 +324,54 @@ class APNet(KerasModelContainer):
         mask1 = Input(shape=mask1_shape, dtype='float32')
         mask2 = Input(shape=mask2_shape, dtype='float32')
         
-        decoded = self.model.get_layer('decoder')([x,mask1,mask2])
+        decoded = self.model.get_layer('decoder')([x, mask1, mask2])
 
-        model = Model(inputs=[x,mask1,mask2], outputs=decoded)
+        model = Model(inputs=[x, mask1, mask2], outputs=decoded)
 
         return model  
 
     def model_with_new_prototypes(self, new_number_of_protos):                
 
-        input_shape = self.model.layers[0].output_shape[1:]  #conv3
+        input_shape = self.model.layers[0].output_shape[1:]
 
-        x = Input(shape=input_shape, dtype='float32',name='input')
+        x = Input(shape=input_shape, dtype='float32', name='input')
         feature_vectors, mask1, mask2 = self.model.get_layer('encoder')(x)
-        feature_vectors = Lambda(lambda x: x,name='features')(feature_vectors)
+        feature_vectors = Lambda(lambda x: x, name='features')(feature_vectors)
 
-        deconv = self.model.get_layer('decoder')([feature_vectors,mask1,mask2])
+        deconv = self.model.get_layer('decoder')([feature_vectors, mask1, mask2])
         
-        prototype_distances = PrototypeLayer(new_number_of_protos,classes=None,distance=self.distance,
-                                                name='prototype_distances', use_weighted_sum=True)(feature_vectors)
+        prototype_distances = PrototypeLayer(
+            new_number_of_protos,
+            distance=self.distance,
+            name='prototype_distances',
+            use_weighted_sum=True
+        )(feature_vectors)
 
-        prototype_similarity_local = Lambda(lambda x: K.exp(-x),name='similarity_local')(prototype_distances)
+        prototype_similarity_local = Lambda(lambda x: K.exp(-x), name='similarity_local')(prototype_distances)
 
         n_classes = self.model.get_layer('out').output_shape[1]
 
         if self.distance == 'euclidean_patches':
-            prototype_distances_sum = Lambda(lambda x: K.sum(x,2),name='prototype_distances_sum')(prototype_distances)
-            prototype_similarity_global = Lambda(lambda x: K.exp(-x),name='similarity_global')(prototype_distances_sum)
-            prototype_similarity_local = Lambda(lambda x: K.max(x,(2,3)),name='maxpool_proto')(prototype_similarity_local)  
+            prototype_distances_sum = Lambda(lambda x: K.sum(x,2), name='prototype_distances_sum')(prototype_distances)
+            prototype_similarity_global = Lambda(lambda x: K.exp(-x), name='similarity_global')(prototype_distances_sum)
+            prototype_similarity_local = Lambda(lambda x: K.max(x, (2,3)), name='maxpool_proto')(prototype_similarity_local)  
         else:
             prototype_distances_sum = Lambda(lambda x: x)(prototype_distances)
 
         if self.use_weighted_sum:
             if self.distance == 'euclidean_patches':
                 mean = WeightedSum(name='mean')(prototype_similarity_global)
-                mean = Lambda(lambda x: x[0]+x[1],name='sum0')([mean,prototype_similarity_local])
+                mean = Lambda(lambda x: x[0]+x[1], name='sum0')([mean, prototype_similarity_local])
 
             else:
                 mean = WeightedSum(name='mean')(prototype_similarity_local)
-            logits = Dense(n_classes, use_bias=False, activation='linear', name='logits')(mean) #kernel_regularizer=l1(0.001) 
+            logits = Dense(n_classes, use_bias=False, activation='linear', name='logits')(mean)
         else:
             logits = Dense(n_classes, use_bias=False, activation='linear', name='logits')(prototype_similarity_local)
                 
         out = Activation(activation=self.logits_activation, name='out')(logits)
 
-        model = Model(inputs=x, outputs=[out,deconv,prototype_distances])
+        model = Model(inputs=x, outputs=[out, deconv, prototype_distances])
 
         return model
 
@@ -400,11 +386,11 @@ class APNet(KerasModelContainer):
         self.model = new_model
 
     def model_without_weighted_sum(self):
-        input_shape = self.model.layers[0].output_shape[1:] #model.get_layer('input').output_shape[1:]  #conv3    
+        input_shape = self.model.layers[0].output_shape[1:]
         x = Input(shape=input_shape, dtype='float32')
 
         feature_vectors, mask1, mask2 = self.model.get_layer('encoder')(x)
-        deconv = self.model.get_layer('decoder')([feature_vectors,mask1,mask2])
+        deconv = self.model.get_layer('decoder')([feature_vectors, mask1, mask2])
         features = self.model.get_layer('features')(feature_vectors)  
         prototype_distances = self.model.get_layer('prototype_distances')(feature_vectors) 
 
@@ -419,10 +405,10 @@ class APNet(KerasModelContainer):
 
         if self.use_weighted_sum:
             if self.distance == 'euclidean_patches':
-                prototype_similarity_global_mean = Lambda(lambda x: K.mean(x,-1),name='mean')(prototype_similarity_global)
-                mean = self.model.get_layer('sum0')([prototype_similarity_global_mean,prototype_similarity_local_max])
+                prototype_similarity_global_mean = Lambda(lambda x: K.mean(x,-1), name='mean')(prototype_similarity_global)
+                mean = self.model.get_layer('sum0')([prototype_similarity_global_mean, prototype_similarity_local_max])
             else:
-                mean = Lambda(lambda x: K.mean(x,-1),name='mean')(prototype_similarity_local)
+                mean = Lambda(lambda x: K.mean(x,-1), name='mean')(prototype_similarity_local)
             logits = self.model.get_layer('logits')(mean)  
         else:
             logits = self.model.get_layer('logits')(prototype_similarity_local_max)        
@@ -433,12 +419,7 @@ class APNet(KerasModelContainer):
         else:
             model = Model(
                 inputs=x,
-                outputs=[
-                    #prototype_similarity_global,
-                    #prototype_similarity_global_mean,
-                    mean,
-                    prototype_similarity_local]
-                    #prototype_similarity_local_max]
+                outputs=[mean, prototype_similarity_local]
                 )
 
         return model
@@ -482,10 +463,10 @@ class APNet(KerasModelContainer):
             List of paths to audio files. Len of this list has to be N_files
         """
         self.data_instances = DataInstances(
-            X_feat, X_train, Y_train, Files_names_train, n_classes=Y_train.shape[1],use_kmeans=False, projection2D=projection2D)
+            X_feat, X_train, Y_train, Files_names_train, n_classes=Y_train.shape[1], use_kmeans=False, projection2D=projection2D)
 
 
-    def refine_prototypes(self, X_train, gamma=2, force_get_prototypes=False): #gamma=2
+    def refine_prototypes(self, X_train, gamma=2, force_get_prototypes=False):
         """
         Refine the model by deleting similar prototypes.
 
@@ -504,19 +485,14 @@ class APNet(KerasModelContainer):
         print(self.prototypes.classes)
         self.prototypes.sort()
         print(self.prototypes.classes)
-        #prototypes_embeddings,prototypes_melspec,_,prototypes_classes, prototypes_distances,_ = self.prototypes.get_all_instances()
         N_protos = self.prototypes.get_number_of_instances()
         
         prototypes_distances = np.power(np.expand_dims(self.prototypes.embeddings, 0) - np.expand_dims(self.prototypes.embeddings, 1), 2)
         print(prototypes_distances.shape)
         prototypes_distances = np.mean(prototypes_distances, axis=(2,3,4))
         print(prototypes_distances.shape)
-        #prototypes_distances = np.power(self.prototypes.embeddings[prototype,:,:,j] - 
-        #                             self.prototypes.embeddings[prototype,:,:,k],2))
         
         prototypes_distances_sum = np.mean(prototypes_distances, axis=0)
-
-        #gamma = np.mean(prototypes_distances_sum) - 5*np.std(prototypes_distances_sum)
         
         print(prototypes_distances_sum)
         print(gamma)
@@ -535,27 +511,12 @@ class APNet(KerasModelContainer):
                 continue
             class_ix = self.prototypes.classes[j]
 
-            #prototypes_distances_class = prototypes_distances_original[self.prototypes.classes==class_ix, self.prototypes.classes==class_ix]
-            #print(prototypes_distances_class.shape)
-
-            #gamma = np.mean(prototypes_distances_class) - 1.5*np.std(prototypes_distances_class)
-
             min_distance = np.amin(prototypes_distances[j])
             argmin = np.argmin(prototypes_distances[j])
             print(min_distance, argmin, gamma)
             if (min_distance < gamma) & (j not in keep) & (self.prototypes.classes[argmin] == class_ix):
                 deletes.append(j)
                 keep.append(argmin)
-
-            # prototypes_distances_j = prototypes_distances_sum[j]
-            # delete = np.where((self.prototypes.classes==class_ix) & (indexes> j) & 
-            #                   (np.abs(prototypes_distances_sum - prototypes_distances_j)<gamma)) #<
-            # if len(delete[0])>0:
-            #     keep[j] = len(delete[0])+1
-            #     if deletes is None:
-            #         deletes = delete[0]
-            #     else:
-            #         deletes = np.concatenate((deletes,delete[0]))
 
         deletes = np.unique(deletes)
         print(deletes)
@@ -566,14 +527,11 @@ class APNet(KerasModelContainer):
 
         new_prototypes_distances_sum  = np.delete(prototypes_distances_sum, deletes)
         
-        W_dense_new,W_mean_new = self.prototypes.get_weights()
+        W_dense_new, W_mean_new = self.prototypes.get_weights()
 
-        prototypes_feat_new,prototypes_mel_new,_,prototypes_classes_new, _ = self.prototypes.get_all_instances()
+        prototypes_feat_new, prototypes_mel_new, _, prototypes_classes_new, _ = self.prototypes.get_all_instances()
         
         N_protos_new = self.prototypes.get_number_of_instances()
-
-        # redefine self.model with the debugged model
-        #self.model = debugg_model(self.model, N_protos_new)
 
         self.model = self.model_with_new_prototypes(N_protos_new)
         self.model.get_layer('prototype_distances').set_weights([prototypes_feat_new])
@@ -588,13 +546,13 @@ class APNet(KerasModelContainer):
 
         conv3, bias_conv3 = self.model.get_layer('encoder').get_layer('conv3').get_weights()
         n_channels = len(bias_conv3)
-        d = np.zeros((n_channels,n_channels))
+        d = np.zeros((n_channels, n_channels))
 
         for prototype in range(len(self.prototypes.embeddings)):
             for j in range(n_channels):
                 for k in range(n_channels): 
-                    d[j,k] += np.sum(np.power(self.prototypes.embeddings[prototype,:,:,j] - 
-                                     self.prototypes.embeddings[prototype,:,:,k],2))
+                    d[j, k] += np.sum(np.power(self.prototypes.embeddings[prototype, :, :, j] - 
+                                     self.prototypes.embeddings[prototype, :, :, k],2))
 
         d_orig = d.copy()
         top_N = 8
@@ -607,18 +565,12 @@ class APNet(KerasModelContainer):
         stop = False
         while(stop==False):
             y = [x for x in d_orig.flatten() if x != 0]
-            #print(y)
+
             idx = np.argpartition(-d_b, d_b.size - top_N, axis=None)[-top_N:]
             result = np.column_stack(np.unravel_index(idx, d_b.shape))
-            # gamma = np.mean(y)-1.5*np.std(y) #np.amax(d_orig)/10.
-            # result = np.argwhere(d_b < gamma)
-            # print(gamma, np.amin(d_b))
-            # if len(result) == 0:
-            #     gamma = np.mean(y)-1.0*np.std(y)
-            #     result = np.argwhere(d_b < gamma)
             delete = []
             delete.append(result[0,0])
-            for j in range(1,len(result)):
+            for j in range(1, len(result)):
                 if result[j,0] in delete:
                     delete.append(result[j,1])
                 else:
@@ -626,7 +578,7 @@ class APNet(KerasModelContainer):
             delete = np.asarray(delete)
             delete = np.unique(delete)
             print('delete %d channels'%len(delete))
-           # stop = True
+
             if len(delete)==top_N_orig:
                stop = True
             else:
@@ -672,7 +624,7 @@ class APNet(KerasModelContainer):
             self.model.get_layer('encoder').get_layer(layer).set_weights(old_weights[layer])    
 
         self.model.get_layer('prototype_distances').set_weights([new_prototypes])
-        self.model.get_layer('encoder').get_layer('conv3').set_weights([new_conv3,new_bias_conv3])
+        self.model.get_layer('encoder').get_layer('conv3').set_weights([new_conv3, new_bias_conv3])
 
 
 class AttRNNSpeechModel(KerasModelContainer):
@@ -709,8 +661,6 @@ class AttRNNSpeechModel(KerasModelContainer):
         x = Conv2D(1, (5, 1), activation='relu', padding='same')(x)
         x = BatchNormalization()(x)
 
-        # x = Reshape((125, 80)) (x)
-        # keras.backend.squeeze(x, axis)
         x = Lambda(lambda q: K.squeeze(q, -1), name='squeeze_last_dim')(x)
 
         x = Bidirectional(LSTM(64, return_sequences=True)

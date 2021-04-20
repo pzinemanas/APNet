@@ -10,11 +10,10 @@ class PrototypeLayer(Layer):
     Prototype_distances keras layer. Calculates the distance of the input to each
     prototype. The prototypes are stores as a weight of the layer.
     """
-    def __init__(self, n_prototypes, classes=None, distance= 'euclidean', use_weighted_sum=True, **kwargs):
+    def __init__(self, n_prototypes, distance= 'euclidean', use_weighted_sum=True, **kwargs):
         self.n_prototypes = n_prototypes
         self.distance = distance        
         self.use_weighted_sum = use_weighted_sum
-        self.classes = classes
         super(PrototypeLayer, self).__init__(**kwargs)
 
     def build(self, input_shape):
