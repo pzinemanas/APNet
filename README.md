@@ -26,11 +26,9 @@ pip install "tensorflow<1.14" # for CPU-only version
 pip install "tensorflow-gpu<1.14" # for GPU version
 ```
 
-Now please install DCASE-models from github repository:
+Now please install DCASE-models:
 ``` 
-git clone https://github.com/MTG/DCASE-models.git
-cd DCASE-models
-pip install .
+pip install "DCASE-models==0.2.0-rc0"
 ```
 
 Install other dependencies:
