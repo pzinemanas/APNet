@@ -84,8 +84,10 @@ if args.dataset not in available_datasets:
 if args.features not in available_features:
     raise AttributeError('Features not available')
 
-if args.model not in available_models:
-    if args.model.split('/')[0] not in available_models:
+model_name = args.model
+if model_name not in available_models:
+    model_name = args.model.split('/')[0]
+    if model_name not in available_models:
         raise AttributeError('Model not available')
 
 # Model paths
@@ -98,7 +100,7 @@ params = load_json(parameters_file)
 
 params_features = params['features'][args.features]
 params_dataset = params['datasets'][args.dataset]
-params_model = params['models'][args.model]
+params_model = params['models'][model_name]
 
 # Get and init dataset class
 dataset_class = available_datasets[args.dataset]
